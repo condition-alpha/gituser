@@ -55,7 +55,7 @@ That's all.
         Setting git user id from /home/jdoe/.git/id/local
 -   Example 2: matching remote
 
-        example$ git clone git@github.com:c-alpha/gituser.git
+        example$ git clone git@github.com:jdoe/gituser.git
         Cloning into 'gituser'...
         remote: Enumerating objects: 6, done.
         remote: Counting objects: 100% (6/6), done.
@@ -78,8 +78,8 @@ That's all.
 
     This example shows two features.
 
-    First, the script supports one account per git forge only. If you need more than one account for one and the same got forge, please create an issue with a feature request.
+    First, the script supports one account per git forge only. If you need more than one account for one and the same git forge, please create an issue with a feature request.
 
     Secondly, if there is a remote cunningly called `origin`, it is offered as the default at the prompt. I.e. in the above example you will simply have to hit the Enter key to select the `origin` remote. For all other remotes, the prompt offers `TAB` completion.
 
-Voilá, that's all.
+Have fun!
