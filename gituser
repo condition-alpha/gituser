@@ -1,0 +1,208 @@
+#!/usr/bin/env perl
+
+# MIT Licence
+#
+# Copyright (c) 2020 Condition-ALPHA
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# -------------------- [ End of Licence Text ] -------------------------
+#
+# Set the user id on a working copy when using "useConfigOnly = true"
+# in your ~/.gitconfig
+#
+# https://git-scm.com/docs/git-config#Documentation/git-config.txt-useruseConfigOnly
+#
+# Most git forges have introduced privary protecting schemes to hide
+# your real email address. This means that your user ID will be
+# different for each git forge (GitHub, GitLab, etc.). This also
+# implies that you can no longer set your ID in your global
+# configuration file ~/.gitconfig, but will need to do so in every
+# working copy, and use your platform-specific ID for it.
+#
+# But since with the mentioned configuration option there is no
+# default ID anymore, this practically meansn that after each "git
+# init" or "git clone" you will first have to manually update the
+# working copy configuration before you can commit. And you have to
+# remember or look up the arcane "anonymous" email address for each
+# platform. This slightly inconvenient (to say the least).
+#
+# The present script automates this job for you. It will check the
+# repo you are currently in for information about remotes. It will
+# then compare these against the identity files you are keeping under
+# ~/.git/id/ (user@forge naming convention). If there is at least one
+# match, it will offer you all matches and let you choose which id you
+# wish to use. If there are no remotes at all, it will use the id from
+# the special file ~/.git/id/local.
+#
+# Thus, after "git init" or "git clone" simply invoke this script and
+# never worry again. It also overwrites any pre-existing user id
+# seetings, so you can invoke it as often as you like to update a
+# repo's settings.
+#
+# The following git remote URL naming conventions are assumed and
+# supported only:
+#
+# (1) http://<forge>/<user>/<repo>
+# (2) https://<forge>/<user>/<repo>
+# (3) ssh://git@<forge>:<user>/<repo>
+# (4) git@<forge>:<user>/<repo>       (implicit ssh)
+#
+# CAVEATS:
+#
+# - works for the current working directory only, i.e. you have to cd
+#   to where you want the settings to be updated
+#
+# - no guarantees what will happen if a remote's URL does not follow
+#   one of the above listed patterns
+#
+# - the directory containing the identity files is hardwired as
+#   ~/.git/id/ (i.e. there is no way of changing it)
+#
+# - no error checking is done on the contents of the identity files in
+#   your home dir (~/.git/id/), i.e. there are no guarantees what will
+#   happen if they don't contain a proper git-config user section:
+#
+#  	[user]
+#		name = John Doe
+#		eail = john.doe@example.com
+#
+
+use strict;
+use warnings;
+
+use File::HomeDir;
+use Path::Class;
+use Path::Class::Iterator;
+use Config::GitLike::Git;
+use Text::TabularDisplay;
+use IO::Prompter;
+
+no warnings qw(redefine);
+sub Config::GitLike::Git::dir_file {
+    my $self = shift;
+    my $path = $self->is_git_dir(".");
+    if ((defined $path) and ($path ne "")) {
+	my($vol, $dirs, undef) = File::Spec->splitpath( $path, 1 );
+	my @dirs               = File::Spec->splitdir( $dirs );
+	$path = File::Spec->catfile( @dirs, "config");
+    }
+    return $path;
+}
+use warnings qw(redefine);
+
+###
+#  get list of configured identities
+#
+my %identities;
+my $id_dir = Path::Class::Dir->new(File::HomeDir->my_home, ".git", "id");
+my $it = Path::Class::Iterator->new(
+    root            => $id_dir,
+    follow_symlinks => 1,
+    follow_hidden   => 0,
+    breadth_first   => 1,
+    show_warnings   => 1
+    );
+while (not $it->done) {
+    my $file = $it->next;
+    $identities{$file->basename} = $file->stringify;
+}
+
+###
+#  get info about remotes from git repo metadata in current dir
+#
+my $config = Config::GitLike::Git->new;
+unless ($config->is_git_dir(".")) {
+    print "This is not a git repository or working copy; nothing to do for me here.\n";
+    exit;
+}
+$config->load(".");
+my %remotes = $config->get_regexp(
+    key => 'remote\.[^.]+\.url'
+    );
+
+###
+#  if the repo has any remotes configured, pick out those for which we
+#  have an idetity file, then let the user choose which id to use
+#  (default option is 'origin' if a remote of that name exists)
+#
+#  if no remotes exist, use the id labeled 'local'
+#
+my $id_file;
+my $remote_count = keys %remotes;
+if ($remote_count == 0) {
+    print "No remotes configured. Using local id from $identities{'local'}.\n";
+    $id_file = $identities{'local'};
+} else {
+    my %matching_ids;
+    keys %remotes; # reset the internal iterator so a prior each() doesn't affect the loop
+    while(my($k, $v) = each %remotes) {
+	my($remote_name) = $k =~ /remote\.([^.]+)\.url/;
+	my($scheme, $authority, $path, $query, $fragment) =
+	    $v =~ m|(?:([^:/?#]+):)?(?://([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?|;
+	if ($scheme =~ /.+@.+/) {
+	    # format (4) special case: implicit ssh; extract authority value from scheme
+	    ($authority) = $scheme =~ m/.+@(.+)/;
+	}
+	elsif ($authority =~ /.+@.+/) {
+	    # formats (1) and (2) special case: remove user part from authority
+	    ($authority) = $authority =~ m/.+@(.+)/;
+	}
+	my($user) = $path =~ m|^/?([^/]+)/.+$|;
+	my $candidate_id = $user.'@'.$authority;
+	$id_file = $identities{$candidate_id};
+	if (defined $id_file) {
+	    $matching_ids{$remote_name} = {
+		id => $candidate_id,
+		file => $id_file,
+		};
+	}
+    }
+    my @remote_names;
+    my $table = Text::TabularDisplay->new( ('remote', 'ID') );
+    keys %matching_ids; # reset the internal iterator so a prior each() doesn't affect the loop
+    while (my($rname, $rinf) = each %matching_ids) {
+	$table->add( ($rname, $rinf->{'id'}) );
+	push  @remote_names, $rname;
+    }
+    my $match_count = keys %matching_ids;
+    print "Found $match_count remote".(($match_count > 1)?'s':'')." for which you have configured a user ID:\n";
+    print $table->render."\n";
+    my $selection;
+    if (defined $matching_ids{'origin'}) {
+	# there is a remote called 'origin'; prompt with origin as the default
+	$selection
+	    = prompt "Select remote (TAB completes/cycles) [origin]",
+	    -guar=>\@remote_names,
+	    -def=>'origin',
+	    ':';
+    } else {
+	# no remote called 'origin'; prompt without default
+	$selection
+	    = prompt "Select remote",
+	    -guar=>\@remote_names,
+	    ':';
+    }
+    $id_file = $matching_ids{$selection}->{'file'};
+}
+print "Setting git user id from $id_file\n";
+my $user_data = Config::GitLike->load_file($id_file);
+my $username  = $user_data->{'user.name'};
+my $email     = $user_data->{'user.email'};
+$config->set(key => 'user.name',  value => $username, filename => $config->dir_file);
+$config->set(key => 'user.email', value => $email,    filename => $config->dir_file);
