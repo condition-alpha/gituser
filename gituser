@@ -80,7 +80,7 @@
 #
 #  	[user]
 #		name = John Doe
-#		eail = john.doe@example.com
+#		email = john.doe@example.com
 #
 
 use strict;
@@ -89,22 +89,10 @@ use warnings;
 use File::HomeDir;
 use Path::Class;
 use Path::Class::Iterator;
+use Config::GitLike 1.18;	# https://github.com/bestpractical/config-gitlike/pull/14
 use Config::GitLike::Git;
 use Text::TabularDisplay;
 use IO::Prompter;
-
-no warnings qw(redefine);
-sub Config::GitLike::Git::dir_file {
-    my $self = shift;
-    my $path = $self->is_git_dir(".");
-    if ((defined $path) and ($path ne "")) {
-	my($vol, $dirs, undef) = File::Spec->splitpath( $path, 1 );
-	my @dirs               = File::Spec->splitdir( $dirs );
-	$path = File::Spec->catfile( @dirs, "config");
-    }
-    return $path;
-}
-use warnings qw(redefine);
 
 ###
 #  get list of configured identities
@@ -204,5 +192,5 @@ print "Setting git user id from $id_file\n";
 my $user_data = Config::GitLike->load_file($id_file);
 my $username  = $user_data->{'user.name'};
 my $email     = $user_data->{'user.email'};
-$config->set(key => 'user.name',  value => $username, filename => $config->dir_file);
-$config->set(key => 'user.email', value => $email,    filename => $config->dir_file);
+$config->set(key => 'user.name',  value => $username, filename => $config->dir_file("."));
+$config->set(key => 'user.email', value => $email,    filename => $config->dir_file("."));
