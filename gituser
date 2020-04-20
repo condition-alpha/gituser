@@ -43,12 +43,14 @@
 # platform. This slightly inconvenient (to say the least).
 #
 # The present script automates this job for you. It will check the
-# repo you are currently in for information about remotes. It will
+# repo you are currently in, for information about remotes. It will
 # then compare these against the identity files you are keeping under
-# ~/.git/id/ (user@forge naming convention). If there is at least one
-# match, it will offer you all matches and let you choose which id you
-# wish to use. If there are no remotes at all, it will use the id from
-# the special file ~/.git/id/local.
+# $GIT_ID_DIR (defaulting to ~/.git/id/), using a user@forge naming
+# convention. If there is at least one match, it will offer you all
+# matches and let you choose which id you wish to use. If there are no
+# remotes at all, it will use the id from the special identity file
+# 'local'. Any subdirectorieds of $GIT_ID_DIR will be scanned
+# recursively.
 #
 # Thus, after "git init" or "git clone" simply invoke this script and
 # never worry again. It also overwrites any pre-existing user id
@@ -70,9 +72,6 @@
 #
 # - no guarantees what will happen if a remote's URL does not follow
 #   one of the above listed patterns
-#
-# - the directory containing the identity files is hardwired as
-#   ~/.git/id/ (i.e. there is no way of changing it)
 #
 # - no error checking is done on the contents of the identity files in
 #   your home dir (~/.git/id/), i.e. there are no guarantees what will
@@ -98,7 +97,14 @@ use IO::Prompter;
 #  get list of configured identities
 #
 my %identities;
-my $id_dir = Path::Class::Dir->new(File::HomeDir->my_home, ".git", "id");
+my $id_dir_env = $ENV{'GIT_ID_DIR'};
+my $id_dir;
+if ((defined($id_dir_env)) && ($id_dir_env ne '')) {
+    $id_dir = Path::Class::Dir->new($id_dir_env);
+}
+else {
+    $id_dir = Path::Class::Dir->new(File::HomeDir->my_home, ".git", "id");
+}
 my $it = Path::Class::Iterator->new(
     root            => $id_dir,
     follow_symlinks => 1,
@@ -106,9 +112,14 @@ my $it = Path::Class::Iterator->new(
     breadth_first   => 1,
     show_warnings   => 1
     );
-while (not $it->done) {
-    my $file = $it->next;
-    $identities{$file->basename} = $file->stringify;
+if (defined($it)) {
+    while (not $it->done) {
+	my $file = $it->next;
+	$identities{$file->basename} = $file->stringify;
+    }
+} else {
+    print "ERROR: unable to scan \"".$id_dir->stringify."\" for git forge identity definitions.\n";
+    exit;
 }
 
 ###
@@ -116,7 +127,7 @@ while (not $it->done) {
 #
 my $config = Config::GitLike::Git->new;
 unless ($config->is_git_dir(".")) {
-    print "This is not a git repository or working copy; nothing to do for me here.\n";
+    print "This is not a git repository, or working copy; nothing to do for me here.\n";
     exit;
 }
 $config->load(".");

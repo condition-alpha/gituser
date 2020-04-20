@@ -33,14 +33,15 @@ That's all.
 
 ### Configuration
 
-1.  `mkdir -p ~/.git/id`
-2.  Create a file named `~/.git/id/local` that contains a git configuration file section with the user and email ids you want to use for local repos:
+1.  `mkdir -p ~/.git/id` (or any other path of your choice)
+2.  \[Optional\] `export GIT_ID_DIR = ${HOME}/.git/id` (only needed if you chose a different path in the previous step)
+3.  Create a file named `~/.git/id/local` (or `${GIT_ID_DIR}/local`) that contains a git configuration file section with the user and email ids you want to use for local repos:
 
         [user]
              name = John Doe
              email = j.doe@gmail.com
-3.  Repeat step 2 for each git forge account you have, and name the files in the `/.git/id` according to the naming convention username@forge (for example `jdoe@github.com`).
-4.  [Optional] You can use symbolic links to use the same ids for more than one account.
+4.  Repeat step 3 for each git forge account you have, and name the files in the `/.git/id` according to the naming convention username@forge (for example `jdoe@github.com`).
+5.  \[Optional\] You can use symbolic links to use the same ids for more than one account.
 
 
 ### Using it
