@@ -33,54 +33,81 @@ That's all.
 
 ### Configuration
 
-1.  `mkdir -p ~/.git/id` (or any other path of your choice)
-2.  \[Optional\] `export GIT_ID_DIR = ${HOME}/.git/id` (only needed if you chose a different path in the previous step)
-3.  Create a file named `~/.git/id/local` (or `${GIT_ID_DIR}/local`) that contains a git configuration file section with the user and email ids you want to use for local repos:
-
-        [user]
-             name = John Doe
-             email = j.doe@gmail.com
-4.  Repeat step 3 for each git forge account you have, and name the files in the `/.git/id` according to the naming convention username@forge (for example `jdoe@github.com`).
-5.  \[Optional\] You can use symbolic links to use the same ids for more than one account.
+1. `mkdir -p ~/.git/id` (or any other path of your choice)
+2. \[Optional\] `export GIT_ID_DIR = ${HOME}/.git/id` (only needed if you chose a different path in the previous step)
+3. Create a file named `~/.git/id/local` (or `${GIT_ID_DIR}/local`) that contains a git configuration file section with the user and email ids you want to use for local repos:
+   <pre>
+   [user]
+        name = John Doe
+        email = j.doe@gmail.com
+   </pre>
+4. Repeat step 3 for each git forge account you have, and name the files in the `/.git/id` according to the naming convention username@forge (for example `jdoe@github.com`).
+5. \[Optional\] You can use symbolic links to use the same ids for more than one account.
 
 
 ### Using it
 
--   Example 1: local id
+#### Example 1: local id
+<pre>
+<b>example$</b> <i>git init</i>
+Initialized empty Git repository in /path/to/repo/.git/
+<b>example$</b> <i>gituser</i>
+No remotes configured. Using local id from /home/jdoe/.git/id/local.
+Setting git user id from /home/jdoe/.git/id/local
+<b>example$</b> |
+</pre>
 
-        example$ git init
-        Initialized empty Git repository in /path/to/repo/.git/
+#### Example 2: matching remote
+<pre>
+<b>example$</b> <i>git clone git@github.com:jdoe/gituser.git</i>
+Cloning into 'gituser'...
+remote: Enumerating objects: 6, done.
+remote: Counting objects: 100% (6/6), done.
+remote: Compressing objects: 100% (5/5), done.
+remote: Total 6 (delta 1), reused 3 (delta 0), pack-reused 0
+Receiving objects: 100% (6/6), 4.23 KiB | 4.23 MiB/s, done.
+Resolving deltas: 100% (1/1), done.
+<b>example$</b> <i>cd gituser</i>
+<b>example$</b> <i>gituser</i>
+This repo has 4 remotes on forges for which you have a user ID:
++------------+------------------------------+
+| remote     | forge repo                   |
++------------+------------------------------+
+| upstream   | github.com/c-alpha/gituser   |
+| my-sandbox | github.com/flurrycat/gituser |
+| origin     | github.com/jdoe/gituser      |
+| playground | gitlab.com/johnd/gituser     |
++------------+------------------------------+
+These are your identities for these forges:
++----------------------+
+| ID                   |
++----------------------+
+| jdoe@github.com      |
+| flurrycat@github.com |
+| johnd@gitlab.com     |
++----------------------+
+ID for future commits (TAB completes/cycles) [jdoe@github.com]: <i>ENTER</i>
+Setting git user id from /home/jdoe/.git/id/jdoe@github.com
+<b>example$</b> |
+</pre>
 
-        example$ gituser
-        No remotes configured. Using local id from /home/jdoe/.git/id/local.
-        Setting git user id from /home/jdoe/.git/id/local
--   Example 2: matching remote
+This example shows two features.
 
-        example$ git clone git@github.com:jdoe/gituser.git
-        Cloning into 'gituser'...
-        remote: Enumerating objects: 6, done.
-        remote: Counting objects: 100% (6/6), done.
-        remote: Compressing objects: 100% (5/5), done.
-        remote: Total 6 (delta 1), reused 3 (delta 0), pack-reused 0
-        Receiving objects: 100% (6/6), 4.23 KiB | 4.23 MiB/s, done.
-        Resolving deltas: 100% (1/1), done.
+First, the script supports more than one account per git forge. In
+the above, hypothetical example, the user has an account `jdoe`
+(which we assume is used for work), and an account `flurrycat`
+(which we assume is used for personal stuff) on the same git
+forge. Both user accounts are offered for that git forge. In our
+example, the user has also configured a remote for a second forge,
+but for which there is only one identity. Hence, three options are
+offered.
 
-        example$ cd gituser
+Secondly, if there is a remote cunningly called `origin`, and the
+user name associated with that remote in the current repository
+matches a configured identity, that identity is offered as the
+default at the prompt. I.e. in the above example you will simply
+have to hit the Enter key to select the identity
+`jdoe@github.com`.
 
-        example$ gituser
-        Found 1 remote for which you have configured a user ID:
-        +--------+-----------------+
-        | remote | ID              |
-        +--------+-----------------+
-        | origin | jdoe@github.com |
-        +--------+-----------------+
-        Select remote (TAB completes/cycles) [origin]: origin
-        Setting git user id from /home/jdoe/.git/id/jdoe@github.com
-
-    This example shows two features.
-
-    First, the script supports one account per git forge only. If you need more than one account for one and the same git forge, please create an issue with a feature request.
-
-    Secondly, if there is a remote cunningly called `origin`, it is offered as the default at the prompt. I.e. in the above example you will simply have to hit the Enter key to select the `origin` remote. For all other remotes, the prompt offers `TAB` completion.
-
-Have fun!
+In all cases, the prompt offers completion and option cycling with
+`TAB`.
