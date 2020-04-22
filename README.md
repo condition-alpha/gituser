@@ -48,26 +48,52 @@ That's all.
 ### Using it
 
 #### Example 1: local id
-<pre>
-<b>example$</b> <i>git init</i>
+<pre><b>example$</b> <i>git init</i>
 Initialized empty Git repository in /path/to/repo/.git/
+<b>example$</b> <i>vi README.md</i>
+<i># edit README.md</i>
+<b>example$</b> <i>git status</i>
+On branch master
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   README.md
+
+no changes added to commit (use "git add" and/or "git commit -a")
+<b>example$</b> <i>git commit -a -m "initial commit"</i>
+
+*** Please tell me who you are.
+
+Run
+
+  git config --global user.email "you@example.com"
+  git config --global user.name "Your Name"
+
+to set your account's default identity.
+Omit --global to set the identity only in this repository.
+
+fatal: no email was given and auto-detection is disabled
 <b>example$</b> <i>gituser</i>
 No remotes configured. Using local id from /home/jdoe/.git/id/local.
 Setting git user id from /home/jdoe/.git/id/local
-<b>example$</b> |
-</pre>
+<b>example$</b> <i>git commit -a -m "initial commit"</i>
+[master d74d1bf] initial commit
+ 1 file changed, 1 insertion(+)
+<b>example$</b> |</pre>
 
 #### Example 2: matching remote
-<pre>
-<b>example$</b> <i>git clone git@github.com:jdoe/gituser.git</i>
-Cloning into 'gituser'...
+<pre><b>example$</b> <i>git clone git@github.com:jdoe/myrepo.git</i>
+Cloning into 'myrepo'...
 remote: Enumerating objects: 6, done.
 remote: Counting objects: 100% (6/6), done.
 remote: Compressing objects: 100% (5/5), done.
 remote: Total 6 (delta 1), reused 3 (delta 0), pack-reused 0
 Receiving objects: 100% (6/6), 4.23 KiB | 4.23 MiB/s, done.
 Resolving deltas: 100% (1/1), done.
-<b>example$</b> <i>cd gituser</i>
+<b>example$</b> <i>cd myrepo</i>
+<b>example$</b> <i>git remote add...</i>
+<i># add further remotes</i>
 <b>example$</b> <i>gituser</i>
 This repo has 4 remotes on forges for which you have a user ID:
 +------------+------------------------------+
@@ -88,8 +114,7 @@ These are your identities for these forges:
 +----------------------+
 ID for future commits (TAB completes/cycles) [jdoe@github.com]: <i>ENTER</i>
 Setting git user id from /home/jdoe/.git/id/jdoe@github.com
-<b>example$</b> |
-</pre>
+<b>example$</b> |</pre>
 
 This example shows two features.
 
