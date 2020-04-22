@@ -1,4 +1,4 @@
-
+<img src="https://condition-alpha.com/software/images/gituser.png" width="150px" alt="gituser logo" />
 
 # gituser - Set the user id in a git working copy quickly when using `user.useConfigOnly = true`
 
