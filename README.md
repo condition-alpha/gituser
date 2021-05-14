@@ -26,7 +26,7 @@ This is where `gituser` comes into play. It automates all of this, presents you 
 ### Installation
 
 1.  Copy or clone the `gituser` script to a directory that's in your `PATH`
-2.  `cpanm File::HomeDir Path::Class Path::Class::Iterator Config::GitLike::Git Text::TabularDisplay IO::Prompter`
+2.  `cpanm Path::Class File::HomeDir Path::Class Path::Class::Iterator Config::GitLike Config::GitLike::Git Text::TabularDisplay IO::Prompter; Term::ANSIColor`
 
 That's all.
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S perl -w
+# -*- mode:perl; -*-
 
 # MIT Licence
 #
@@ -86,178 +87,242 @@ use v5.32;
 use warnings;
 use open qw(:std :utf8);
 no feature qw(indirect);
-use feature qw(signatures);
 no warnings qw(experimental::signatures);
+use feature qw(signatures);
 
+use Path::Class;
 use File::HomeDir;
 use Path::Class;
 use Path::Class::Iterator;
-use Config::GitLike 1.18;       # https://github.com/bestpractical/config-gitlike/pull/14
+use Config::GitLike 1.18; # https://github.com/bestpractical/config-gitlike/pull/14
 use Config::GitLike::Git;
 use Text::TabularDisplay;
 use IO::Prompter;
+use Term::ANSIColor;
 
-###
-#  get list of configured identities
-#
+use Data::Dumper;
+
 my %identities;
-my $id_dir_env = $ENV{'GIT_ID_DIR'};
-my $id_dir;
-if ((defined($id_dir_env)) && ($id_dir_env ne '')) {
+my $repo_path = dir(".")->absolute;
+my $repo_name = $repo_path->relative($repo_path->parent)->stringify;
+{
+  load_identities();
+
+  # top-level repository
+  configure_ids_for_repo($repo_path->stringify, "repository", undef, $repo_name);
+
+  # recursively descend into sub(module|tree|repo)s
+
+  # submodules
+  if (has_submodules($repo_path->stringify)) {
+    configure_ids_for_submodules($repo_path->stringify);
+  }
+
+  # TODO: subtrees
+  # my @subtrees = `git log | grep git-subtree-dir | tr -d ' ' | cut -d ":" -f2 | sort | uniq`;
+  # chomp @subtrees;
+  # print Dumper(\@subtrees);
+
+  # TODO: subrepos
+}
+
+sub load_identities () {
+  # get list of configured identities
+  my $id_dir_env = $ENV{'GIT_ID_DIR'};
+  my $id_dir;
+  if ((defined($id_dir_env)) && ($id_dir_env ne '')) {
     $id_dir = Path::Class::Dir->new($id_dir_env);
-}
-else {
+  } else {
     $id_dir = Path::Class::Dir->new(File::HomeDir->my_home, ".git", "id");
-}
-my $iter = Path::Class::Iterator->new(
-    root            => $id_dir,
-    follow_symlinks => 1,
-    follow_hidden   => 0,
-    breadth_first   => 1,
-    show_warnings   => 1
-    );
-if (defined($iter)) {
+  }
+  my $iter = Path::Class::Iterator->new(
+					root            => $id_dir,
+					follow_symlinks => 1,
+					follow_hidden   => 0,
+					breadth_first   => 1,
+					show_warnings   => 1
+				       );
+  if (defined($iter)) {
     while (not $iter->done) {
-        my $file = $iter->next;
-        $identities{$file->basename} = $file->stringify;
+      my $file = $iter->next;
+      $identities{$file->basename} = $file->stringify;
     }
-} else {
-    print "ERROR: unable to scan \"".$id_dir->stringify."\" for git forge identity definitions.\n";
+  } else {
+    say "ERROR: unable to scan \"".$id_dir->stringify."\" for git forge identity definitions.";
     exit;
+  }
 }
 
-###
-#  get info about remotes from git repo metadata in current dir
-#
-my $config = Config::GitLike::Git->new;
-unless ($config->is_git_dir(".")) {
-    print "This is not a git repository, or working copy; nothing to do for me here.\n";
-    exit;
+sub has_submodules ($path) {
+   my $gitmodules_file = Path::Class::File->new($path, '.gitmodules');
+   if (-f $gitmodules_file) {
+     return 1;
+   }
+   else {
+     return;
+   }
 }
-$config->load(".");
-my %remotes_raw = $config->get_regexp(
-    key => 'remote\.[^.]+\.url'
-    );
 
-###
-#  parse the remote info into something more palatable
-#
-my %remotes;
-while(my($k, $v) = each %remotes_raw) {
+sub parse_git_url ($url) {
+  my($scheme, $authority, $path, $query, $fragment) =
+    $url =~ m|(?:([^:/?#]+):)?(?://([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?|;
+  if ($scheme =~ /.+@.+/) {
+    # format (4) special case: implicit ssh; extract authority value from scheme
+    ($authority) = $scheme =~ m/.+@(.+)/;
+  } elsif ($authority =~ /.+@.+/) {
+    # formats (1) and (2) special case: remove user part from authority
+    ($authority) = $authority =~ m/.+@(.+)/;
+  }
+  my ($user) = $path =~ m|^/?([^/]+)/.+?$|;
+  if ( ! ($path =~ m|^/.+$|)) {
+    $path = "/$path";
+  }
+  return ($user, $authority, $path);
+}
+
+sub configure_ids_for_submodules ($dir) {
+  my $gitmodules_file = Path::Class::File->new($dir, '.gitmodules');
+  if (-f $gitmodules_file) {
+    my $submodconfig = Config::GitLike::Git->new;
+    $submodconfig->load_file($gitmodules_file);
+    my %submods_raw = $submodconfig->get_regexp(key => 'submodule\.[^.]+\.path');
+    while (my($k, $submod_path) = each %submods_raw) {
+      my $submod_url = $submodconfig->get(key => 'submodule.'.$submod_path.'.url');
+      my($unused1, $unused2, $sm_url_file) = parse_git_url($submod_url);
+      my ($submod_name) = dir($sm_url_file)->basename =~ m|(.*)(\.git)|;
+      my $offset_path = dir($dir)->relative($repo_path)->stringify;
+      my $git_offset_path = ($offset_path ne ".") ? dir($offset_path, 'modules')->stringify : "";
+      my $submod_gitdir = dir($repo_path, '.git', 'modules', $git_offset_path, $submod_path)->absolute->stringify;
+      configure_ids_for_repo($submod_gitdir,
+			     "submodule",
+			     $submod_name,
+			     ($offset_path ne ".")
+			     ? dir($repo_name, $offset_path, $submod_path)->stringify
+			     : dir($repo_name, $submod_path)->stringify);
+      my $sm_dir = dir($dir, $submod_path)->stringify;
+      if (has_submodules($sm_dir)) {
+	configure_ids_for_submodules($sm_dir);
+      }
+    }
+  }
+}
+
+sub configure_ids_for_repo ($dir, $type, $name, $nominal_dir) {
+  # read git config for repo at $dir
+  my $config = Config::GitLike::Git->new;
+  unless ($config->is_git_dir($dir)) {
+    say color('red')."$dir is not a git repository, or working copy; nothing to do for me here.".color('reset');
+    exit;
+  }
+  else {
+    say "" if $type eq "repository";
+    print color('bold').ucfirst($type).(defined $name ? " $name" : "")." at $nominal_dir ".color('reset');
+  }
+  $config->load($dir);
+  my %remotes_raw = $config->get_regexp(key => 'remote\.[^.]+\.url');
+
+  #  parse the remote info into something more palatable
+  my %remotes;
+  while (my($k, $v) = each %remotes_raw) {
     my($remote_name) = $k =~ /remote\.([^.]+)\.url/;
-    my($scheme, $authority, $path, $query, $fragment) =
-        $v =~ m|(?:([^:/?#]+):)?(?://([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?|;
-    if ($scheme =~ /.+@.+/) {
-        # format (4) special case: implicit ssh; extract authority value from scheme
-        ($authority) = $scheme =~ m/.+@(.+)/;
-    }
-    elsif ($authority =~ /.+@.+/) {
-        # formats (1) and (2) special case: remove user part from authority
-        ($authority) = $authority =~ m/.+@(.+)/;
-    }
-    my ($user) = $path =~ m|^/?([^/]+)/.+?$|;
-    if ( ! ($path =~ m|^/.+$|)) {
-        $path = "/$path";
-    }
+    my($user, $authority, $path) = parse_git_url($v);
     $remotes{$remote_name} = {
-        user => $user,
-        authority => $authority,
-        path => $path,
-    };
-}
+			      user => $user,
+			      authority => $authority,
+			      path => $path,
+			     };
+  }
 
-###
-#  if the repo has any remotes configured, pick out those for which we
-#  have an idetity file, then let the user choose which id to use
-#  (default option is 'origin' if a remote of that name exists)
-#
-#  if no remotes exist, use the id labeled 'local'
-#
-my $id_file;
-my $num_remotes = keys %remotes;
-if ($num_remotes == 0) {
-    print "No remotes configured. Using local id from $identities{'local'}.\n";
+  #  if the repo has any remotes configured, pick out those for which we
+  #  have an idetity file, then let the user choose which id to use
+  #  (default option is 'origin' if a remote of that name exists)
+  #
+  #  if no remotes exist, use the id labeled 'local'
+  my $id_file;
+  my $num_remotes = keys %remotes;
+  if ($num_remotes == 0) {
+    say "has no remotes configured.";
     $id_file = $identities{'local'};
-} else {
+  } else {
     my %matching_ids;
     my %matching_remotes;
     keys %remotes; # reset the internal iterator so a prior each() doesn't affect the loop
-    while(my($k, $v) = each %remotes) {
-        keys %identities; # reset the internal iterator so a prior each() doesn't affect the loop
-        while(my($ik, $iv) = each %identities) {
-            if ($ik =~ m|$v->{'authority'}|) {
-                if (! defined($matching_ids{$ik})) {
-                    $matching_ids{$ik} = { user_match => 0,
-                                           origin_match => 0, };
-                }
-                if ($ik =~ m|$v->{'user'}|) {
-                    $matching_ids{$ik}->{'user_match'} = 1;
-                }
-                if ($k eq 'origin') {
-                    $matching_ids{$ik}->{'origin_match'} = 1;
-                }
-                if (! defined($matching_remotes{$k})) {
-                    $matching_remotes{$k} = {
-                        forge => $v->{authority},
-                        path  => $v->{path},
-                    };
-                }
-            }
-        }
+    while (my($k, $v) = each %remotes) {
+      keys %identities; # reset the internal iterator so a prior each() doesn't affect the loop
+      while (my($ik, $iv) = each %identities) {
+	if ($ik =~ m|$v->{'authority'}|) {
+	  if (! defined($matching_ids{$ik})) {
+	    $matching_ids{$ik} = { user_match => 0,
+				   origin_match => 0, };
+	  }
+	  if ($ik =~ m|$v->{'user'}|) {
+	    $matching_ids{$ik}->{'user_match'} = 1;
+	  }
+	  if ($k eq 'origin') {
+	    $matching_ids{$ik}->{'origin_match'} = 1;
+	  }
+	  if (! defined($matching_remotes{$k})) {
+	    $matching_remotes{$k} = {
+				     forge => $v->{authority},
+				     path  => $v->{path},
+				    };
+	  }
+	}
+      }
     }
 
     my $remote_count = keys %matching_remotes;
-    print "This repo has $remote_count remote".(($remote_count != 1)?'s':'')." on forges for which you have a user ID".(($remote_count > 0)?':':'.')."\n";
+    say "has $remote_count remote".(($remote_count != 1)?'s':'')." on forges for which you have a user ID".(($remote_count > 0)?':':'.')."";
     if ($remote_count > 0) {
-        my $table_remotes = Text::TabularDisplay->new( ('remote', 'forge repo',) );
-        keys %matching_remotes; # reset the internal iterator so a prior each() doesn't affect the loop
-        while (my($rid, $rinf) = each %matching_remotes) {
-            $table_remotes->add( ($rid,
-                                  $rinf->{'forge'}.$rinf->{'path'}) );
-        }
-        print $table_remotes->render."\n";
+      my $table_remotes = Text::TabularDisplay->new( ('remote', 'forge repo',) );
+      keys %matching_remotes; # reset the internal iterator so a prior each() doesn't affect the loop
+      while (my($rid, $rinf) = each %matching_remotes) {
+	$table_remotes->add( ($rid,
+			      $rinf->{'forge'}.$rinf->{'path'}) );
+      }
+      say $table_remotes->render;
 
-        my $id_count = keys %matching_ids;
-        print "Th".(($id_count != 1)?'ese are':'is is')." your identit".(($id_count != 1)?'ies':'y')." for these forges:\n";
-        my @id_names;
-        my $origin_id;
-        my $table_ids = Text::TabularDisplay->new( ('ID',) );
-        keys %matching_ids; # reset the internal iterator so a prior each() doesn't affect the loop
-        while (my($id, $inf) = each %matching_ids) {
-            $table_ids->add( ($id,) );
-            push  @id_names, $id;
-            if ($inf->{'user_match'} && $inf->{'origin_match'}) {
-                $origin_id = $id;
-            }
-        }
-        print $table_ids->render."\n";
+      my $id_count = keys %matching_ids;
+      say "Th".(($id_count != 1)?'ese are':'is is')." your identit".(($id_count != 1)?'ies':'y')." for these forges:";
+      my @id_names;
+      my $origin_id;
+      my $table_ids = Text::TabularDisplay->new( ('ID',) );
+      keys %matching_ids; # reset the internal iterator so a prior each() doesn't affect the loop
+      while (my($id, $inf) = each %matching_ids) {
+	$table_ids->add( ($id,) );
+	push  @id_names, $id;
+	if ($inf->{'user_match'} && $inf->{'origin_match'}) {
+	  $origin_id = $id;
+	}
+      }
+      say $table_ids->render;
 
-        my $prompt = 'ID for future commits (TAB completes/cycles)';
-        my $selection;
-        if (defined($origin_id)) {
-            # there is a remote called 'origin'; prompt with origin as the default
-            $selection
-                = prompt "$prompt [$origin_id]",
-                -guar=>\@id_names,
-                -def=>$origin_id,
-                ':';
-        } else {
-            # no remote called 'origin'; prompt without default
-            $selection
-                = prompt $prompt,
-                -guar=>\@id_names,
-                ':';
-        }
-        $id_file = $identities{$selection};
+      my $prompt = "ID for future commits (TAB completes/cycles)";
+      my $selection;
+      if (defined($origin_id)) {
+	# there is a remote called 'origin'; prompt with origin as the default
+	$selection
+	  = prompt "$prompt [$origin_id]",
+	  -guar=>\@id_names,
+	  -def=>$origin_id,
+	  ':';
+      } else {
+	# no remote called 'origin'; prompt without default
+	$selection
+	  = prompt $prompt,
+	  -guar=>\@id_names,
+	  ':';
+      }
+      $id_file = $identities{$selection};
+    } else {
+      say "Using local id from $identities{'local'}.";
+      $id_file = $identities{'local'};
     }
-    else {
-        print "Using local id from $identities{'local'}.\n";
-        $id_file = $identities{'local'};
-    }
+  }
+  say "Setting git user id from $id_file\n";
+  my $user_data = Config::GitLike->load_file($id_file);
+  my $username  = $user_data->{'user.name'};
+  my $email     = $user_data->{'user.email'};
+  $config->set(key => 'user.name',  value => $username, filename => $config->dir_file("."));
+  $config->set(key => 'user.email', value => $email,    filename => $config->dir_file("."));
 }
-print "Setting git user id from $id_file\n";
-my $user_data = Config::GitLike->load_file($id_file);
-my $username  = $user_data->{'user.name'};
-my $email     = $user_data->{'user.email'};
-$config->set(key => 'user.name',  value => $username, filename => $config->dir_file("."));
-$config->set(key => 'user.email', value => $email,    filename => $config->dir_file("."));
