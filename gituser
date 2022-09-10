@@ -133,7 +133,7 @@ sub load_identities () {
   if ((defined($id_dir_env)) && ($id_dir_env ne '')) {
     $id_dir = Path::Class::Dir->new($id_dir_env);
   } else {
-    $id_dir = Path::Class::Dir->new(File::HomeDir->my_home, ".git", "id");
+    $id_dir = Path::Class::Dir->new(File::HomeDir->my_home, ".gitids");
   }
   my $iter = Path::Class::Iterator->new(
 					root            => $id_dir,
