@@ -46,7 +46,7 @@
 # The present script automates this job for you. It will check the
 # repo you are currently in, for information about remotes. It will
 # then compare these against the identity files you are keeping under
-# $GIT_ID_DIR (defaulting to ~/.git/id/), using a user@forge naming
+# $GIT_ID_DIR (defaulting to ~/.gitids/), using a user@forge naming
 # convention. If there is at least one match, it will offer you all
 # matches and let you choose which id you wish to use. If there are no
 # remotes at all, it will use the id from the special identity file
@@ -57,6 +57,15 @@
 # never worry again. It also overwrites any pre-existing user id
 # seetings, so you can invoke it as often as you like to update a
 # repo's settings.
+#
+# You can also invoke this script as git's post-checkout hook, in
+# which case it will never do any interactive prompting. Instead, it
+# will check whether a remote called origin exists, and whether you
+# are its owner. In this case, the script will set that identity
+# without prompting. Alternatively, if and when there is a single
+# usable identity only, that identity will be set without prompting.
+# In all other cases, the script will not set any identity, but remind
+# you to invoke the script manually.
 #
 # The following git remote URL naming conventions are assumed and
 # supported only:
@@ -75,7 +84,7 @@
 #   one of the above listed patterns
 #
 # - no error checking is done on the contents of the identity files in
-#   your home dir (~/.git/id/), i.e. there are no guarantees what will
+#   your home dir (~/.gitids/), i.e. there are no guarantees what will
 #   happen if they don't contain a proper git-config user section:
 #
 #       [user]
@@ -97,19 +106,34 @@ use Path::Class::Iterator;
 use Config::GitLike 1.18; # https://github.com/bestpractical/config-gitlike/pull/14
 use Config::GitLike::Git;
 use Text::TabularDisplay;
+use IO::Interactive::Tiny;
 use IO::Prompter;
+
 use Term::ANSIColor;
 
-use Data::Dumper;
+# use Data::Printer;
 
+my $batchmode = 0;
 my %identities;
 my $repo_path = dir(".")->absolute;
 my $repo_name = $repo_path->relative($repo_path->parent)->stringify;
 {
+  unless ( IO::Interactive::Tiny::is_interactive() ) {
+    $batchmode = 1;
+  }
+
+  # perform id setting on `git clone` only, i.e. not on branch
+  # switching or similar
+  # https://git-scm.com/docs/githooks#_post_checkout
+  if ( $batchmode && ( $ARGV[0] ne "0000000000000000000000000000000000000000" ) )
+  {
+    exit;
+  }
+
   load_identities();
 
   # top-level repository
-  configure_ids_for_repo($repo_path->stringify, "repository", undef, $repo_name);
+  configure_ids_for_repo($repo_path->stringify, "repository", undef, $repo_name, $batchmode);
 
   # recursively descend into sub(module|tree|repo)s
 
@@ -121,7 +145,7 @@ my $repo_name = $repo_path->relative($repo_path->parent)->stringify;
   # TODO: subtrees
   # my @subtrees = `git log | grep git-subtree-dir | tr -d ' ' | cut -d ":" -f2 | sort | uniq`;
   # chomp @subtrees;
-  # print Dumper(\@subtrees);
+  # p \@subtrees;
 
   # TODO: subrepos
 }
@@ -207,30 +231,34 @@ sub configure_ids_for_submodules ($dir) {
   }
 }
 
-sub configure_ids_for_repo ($dir, $type, $name, $nominal_dir) {
+sub configure_ids_for_repo ($dir, $type, $name, $nominal_dir, $batchmode) {
   # read git config for repo at $dir
   my $config = Config::GitLike::Git->new;
-  unless ($config->is_git_dir($dir)) {
-    say color('red')."$dir is not a git repository, or working copy; nothing to do for me here.".color('reset');
+  unless ( $config->is_git_dir($dir) ) {
+    say color('red')
+      . "$dir is not a git repository, or working copy; nothing to do for me here."
+      . color('reset');
     exit;
   }
-  else {
+  unless ($batchmode) {
     say "" if $type eq "repository";
-    print color('bold').ucfirst($type).(defined $name ? " $name" : "")." at $nominal_dir ".color('reset');
   }
+  print ucfirst($type)
+    . ( defined $name ? " $name" : "" )
+    . " at $nominal_dir ";
   $config->load($dir);
   my %remotes_raw = $config->get_regexp(key => 'remote\.[^.]+\.url');
 
   #  parse the remote info into something more palatable
   my %remotes;
-  while (my($k, $v) = each %remotes_raw) {
-    my($remote_name) = $k =~ /remote\.([^.]+)\.url/;
-    my($user, $authority, $path) = parse_git_url($v);
+  while ( my ( $k, $v ) = each %remotes_raw ) {
+    my ($remote_name) = $k =~ /remote\.([^.]+)\.url/;
+    my ( $user, $authority, $path ) = parse_git_url($v);
     $remotes{$remote_name} = {
-			      user => $user,
-			      authority => $authority,
-			      path => $path,
-			     };
+      user      => $user,
+      authority => $authority,
+      path      => $path,
+    };
   }
 
   #  if the repo has any remotes configured, pick out those for which we
@@ -239,8 +267,7 @@ sub configure_ids_for_repo ($dir, $type, $name, $nominal_dir) {
   #
   #  if no remotes exist, use the id labeled 'local'
   my $id_file;
-  my $num_remotes = keys %remotes;
-  if ($num_remotes == 0) {
+  if ( (scalar keys %remotes) == 0 ) {
     say "has no remotes configured.";
     $id_file = $identities{'local'};
   } else {
@@ -272,7 +299,10 @@ sub configure_ids_for_repo ($dir, $type, $name, $nominal_dir) {
     }
 
     my $remote_count = keys %matching_remotes;
-    say "has $remote_count remote".(($remote_count != 1)?'s':'')." on forges for which you have a user ID".(($remote_count > 0)?':':'.')."";
+    say "has $remote_count remote"
+      . ( ( $remote_count != 1 ) ? 's' : '' )
+      . " on forges for which you have a user ID"
+      . ( ( $remote_count > 0 ) ? ':' : '.' ) . "";
     if ($remote_count > 0) {
       my $table_remotes = Text::TabularDisplay->new( ('remote', 'forge repo',) );
       keys %matching_remotes; # reset the internal iterator so a prior each() doesn't affect the loop
@@ -283,46 +313,73 @@ sub configure_ids_for_repo ($dir, $type, $name, $nominal_dir) {
       say $table_remotes->render;
 
       my $id_count = keys %matching_ids;
-      say "Th".(($id_count != 1)?'ese are':'is is')." your identit".(($id_count != 1)?'ies':'y')." for these forges:";
+      say "Th"
+        . ( ( $id_count != 1 ) ? 'ese are' : 'is is' )
+        . " your identit"
+        . ( ( $id_count != 1 ) ? 'ies' : 'y' )
+        . " for these forges:";
       my @id_names;
       my $origin_id;
+      my $num_matching_ids = keys %matching_ids;
       my $table_ids = Text::TabularDisplay->new( ('ID',) );
       keys %matching_ids; # reset the internal iterator so a prior each() doesn't affect the loop
-      while (my($id, $inf) = each %matching_ids) {
-	$table_ids->add( ($id,) );
-	push  @id_names, $id;
-	if ($inf->{'user_match'} && $inf->{'origin_match'}) {
-	  $origin_id = $id;
-	}
+      while ( my ( $id, $inf ) = each %matching_ids ) {
+        $table_ids->add( ( $id, ) );
+        push @id_names, $id;
+        if ( ( $inf->{'origin_match'} && $inf->{'user_match'} )
+          || ( $num_matching_ids == 1 ) )
+        {
+          $origin_id = $id;
+        }
       }
       say $table_ids->render;
 
-      my $prompt = "ID for future commits (TAB completes/cycles)";
-      my $selection;
-      if (defined($origin_id)) {
-	# there is a remote called 'origin'; prompt with origin as the default
-	$selection
-	  = prompt "$prompt [$origin_id]",
-	  -guar=>\@id_names,
-	  -def=>$origin_id,
-	  ':';
-      } else {
-	# no remote called 'origin'; prompt without default
-	$selection
-	  = prompt $prompt,
-	  -guar=>\@id_names,
-	  ':';
+      if ( $batchmode ) {
+        if ( defined($origin_id) ) {
+          $id_file = $identities{$origin_id};
+        }
+        else {
+          say color('bold')
+            . "No unambiguous user id match."
+            . color('reset')
+            . " Please invoke `gituser` manually in this repo to set a user id." ;
+        }
       }
-      $id_file = $identities{$selection};
+      else {
+        my $prompt = "ID for future commits (TAB completes/cycles)";
+        my $selection;
+        if ( defined($origin_id) ) {
+          # there is a remote called 'origin'; offer as default
+          $selection = prompt $prompt." [$origin_id]:",
+                               -guarantee => \@id_names,
+                               -default   => $origin_id;
+        }
+        else {
+          # no remote called 'origin'; prompt without default
+          $selection = prompt $prompt.":",
+                               -guarantee => \@id_names;
+        }
+        $id_file = $identities{$selection};
+      }
     } else {
       say "Using local id from $identities{'local'}.";
       $id_file = $identities{'local'};
     }
   }
-  say "Setting git user id from $id_file\n";
-  my $user_data = Config::GitLike->load_file($id_file);
-  my $username  = $user_data->{'user.name'};
-  my $email     = $user_data->{'user.email'};
-  $config->set(key => 'user.name',  value => $username, filename => $config->dir_file("."));
-  $config->set(key => 'user.email', value => $email,    filename => $config->dir_file("."));
+  if ( defined($id_file) ) {
+    say "Setting git user id from $id_file";
+    my $user_data = Config::GitLike->load_file($id_file);
+    my $username  = $user_data->{'user.name'};
+    my $email     = $user_data->{'user.email'};
+    $config->set(
+      key      => 'user.name',
+      value    => $username,
+      filename => $config->dir_file(".")
+    );
+    $config->set(
+      key      => 'user.email',
+      value    => $email,
+      filename => $config->dir_file(".")
+    );
+  }
 }

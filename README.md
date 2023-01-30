@@ -26,26 +26,26 @@ This is where `gituser` comes into play. It automates all of this, presents you 
 ### Installation
 
 1.  Copy or clone the `gituser` script to a directory that's in your `PATH`
-2.  `cpanm Path::Class File::HomeDir Path::Class Path::Class::Iterator Config::GitLike Config::GitLike::Git Text::TabularDisplay IO::Prompter; Term::ANSIColor`
+2.  Install the required Perl modules via `cpanm Path::Class File::HomeDir Path::Class Path::Class::Iterator Config::GitLike Config::GitLike::Git Text::TabularDisplay IO::Interactive::Tiny IO::Prompter Term::ANSIColor`
 
 That's all.
 
 
 ### Configuration
 
-1. `mkdir -p ~/.git/id` (or any other path of your choice)
-2. \[Optional\] `export GIT_ID_DIR = ${HOME}/.git/id` (only needed if you chose a different path in the previous step)
-3. Create a file named `~/.git/id/local` (or `${GIT_ID_DIR}/local`) that contains a git configuration file section with the user and email ids you want to use for local repos:
+1. `mkdir -p ~/.gitids` (or any other path of your choice)
+2. \[Optional\] `export GIT_ID_DIR = ${HOME}/.gitids` (only needed if you chose a different path in the previous step)
+3. Create a file named `~/.gitids/local` (or `${GIT_ID_DIR}/local`) that contains a git configuration file section with the user and email ids you want to use for local repos:
    <pre>
    [user]
         name = John Doe
         email = j.doe@gmail.com
    </pre>
-4. Repeat step 3 for each git forge account you have, and name the files in the `/.git/id` according to the naming convention username@forge (for example `jdoe@github.com`).
+4. Repeat step 3 for each git forge account you have, and name the files in the `/.gitids` according to the naming convention username@forge (for example `jdoe@github.com`).
 5. \[Optional\] You can use symbolic links to use the same ids for more than one account.
 
 
-### Using it
+### Using It Interactively
 
 #### Example 1: local id
 <pre><b>example$</b> <i>git init</i>
@@ -136,3 +136,31 @@ have to hit the Enter key to select the identity
 
 In all cases, the prompt offers completion and option cycling with
 `TAB`.
+
+
+### Using It as a `post-checkout` Hook
+
+In addition to the interactive use described above, `gituser` can also
+be used on [git's `post-checkout`
+hook](https://git-scm.com/docs/githooks#_post_checkout). To make life
+even easier, the `post-checkout` invocation can be configured in the
+[`git init` template
+directory](https://git-scm.com/docs/git-init#_template_directory), so
+that it gets invoked automatically whenever a `git clone` is
+performed. 
+
+For example:
+<pre>
+<b>example$</b> mkdir -p ~/.git-templates/hooks
+<b>example$</b> git config --global init.templatedir ~/.git-templates
+<b>example$</b> cd ~/.git-templates/hooks
+<b>example$</b> ln -s `which gituser` post-checkout
+</pre>
+
+Now, when you `git clone` a remote repository, `gituser` will be
+installed as the `post-checkout` hook, and will be executed after the
+contents of the remote repository have been downloaded into the new
+working copy. For as long as there is an unambiguous identity match
+between the remote repository, and the identities you have configured
+for `gituser`, that identity will be automatically configured in the
+new working copy, and will be used for commits.
